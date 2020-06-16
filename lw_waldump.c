@@ -38,31 +38,29 @@ PG_FUNCTION_INFO_V1(lw_waldump);
 
 static const char *progname;
 
-static int	WalSegSz;
-
 typedef struct XLogDumpPrivate
 {
-	TimeLineID	timeline;
-	char	   *inpath;
-	XLogRecPtr	startptr;
-	XLogRecPtr	endptr;
-	bool		endptr_reached;
+        TimeLineID      timeline;
+        char       *inpath;
+        XLogRecPtr      startptr;
+        XLogRecPtr      endptr;
+        bool            endptr_reached;
 } XLogDumpPrivate;
 
 typedef struct XLogDumpConfig
 {
-	/* display options */
-	bool		bkp_details;
-	int			stop_after_records;
-	int			already_displayed_records;
-	bool		follow;
-	bool		stats;
-	bool		stats_per_record;
+        /* display options */
+        bool            bkp_details;
+        int                     stop_after_records;
+        int                     already_displayed_records;
+        bool            follow;
+        bool            stats;
+        bool            stats_per_record;
 
-	/* filter options */
-	int			filter_by_rmgr;
-	TransactionId filter_by_xid;
-	bool		filter_by_xid_enabled;
+        /* filter options */
+        int                     filter_by_rmgr;
+        TransactionId filter_by_xid;
+        bool            filter_by_xid_enabled;
 } XLogDumpConfig;
 
 typedef struct Stats
@@ -81,182 +79,91 @@ static void fatal_error(const char *fmt,...) pg_attribute_printf(1, 2);
 static void
 fatal_error(const char *fmt,...)
 {
-	va_list		args;
+        va_list         args;
 
-	fflush(stdout);
+        fflush(stdout);
 
-	fprintf(stderr, _("%s: FATAL:  "), progname);
-	va_start(args, fmt);
-	vfprintf(stderr, _(fmt), args);
-	va_end(args);
-	fputc('\n', stderr);
+        fprintf(stderr, _("%s: FATAL:  "), progname);
+        va_start(args, fmt);
+        vfprintf(stderr, _(fmt), args);
+        va_end(args);
+        fputc('\n', stderr);
 
-	exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE);
 }
 
 /*
- * Open the file in the valid target directory.
+ * Try to find the file in several places:
+ * if directory == NULL:
+ *	 fname
+ *	 XLOGDIR / fname
+ *	 $PGDATA / XLOGDIR / fname
+ * else
+ *	 directory / fname
+ *	 directory / XLOGDIR / fname
  *
  * return a read only fd
  */
 static int
-open_file_in_directory(const char *directory, const char *fname)
+fuzzy_open_file(const char *directory, const char *fname)
 {
 	int			fd = -1;
 	char		fpath[MAXPGPATH];
 
-	Assert(directory != NULL);
-
-	snprintf(fpath, MAXPGPATH, "%s/%s", directory, fname);
-	fd = open(fpath, O_RDONLY | PG_BINARY, 0);
-
-	if (fd < 0 && errno != ENOENT)
-		fatal_error("could not open file \"%s\": %s",
-					fname, strerror(errno));
-	return fd;
-}
-
-/*
- * Try to find fname in the given directory. Returns true if it is found,
- * false otherwise. If fname is NULL, search the complete directory for any
- * file with a valid WAL file name. If file is successfully opened, set the
- * wal segment size.
- */
-static bool
-search_directory(const char *directory, const char *fname)
-{
-	int			fd = -1;
-	DIR		   *xldir;
-
-	/* open file if valid filename is provided */
-	if (fname != NULL)
-		fd = open_file_in_directory(directory, fname);
-
-	/*
-	 * A valid file name is not passed, so search the complete directory.  If
-	 * we find any file whose name is a valid WAL file name then try to open
-	 * it.  If we cannot open it, bail out.
-	 */
-	else if ((xldir = opendir(directory)) != NULL)
-	{
-		struct dirent *xlde;
-
-		while ((xlde = readdir(xldir)) != NULL)
-		{
-			if (IsXLogFileName(xlde->d_name))
-			{
-				fd = open_file_in_directory(directory, xlde->d_name);
-				fname = xlde->d_name;
-				break;
-			}
-		}
-
-		closedir(xldir);
-	}
-
-	/* set WalSegSz if file is successfully opened */
-	if (fd >= 0)
-	{
-		PGAlignedXLogBlock buf;
-
-		if (read(fd, buf.data, XLOG_BLCKSZ) == XLOG_BLCKSZ)
-		{
-			XLogLongPageHeader longhdr = (XLogLongPageHeader) buf.data;
-
-			WalSegSz = longhdr->xlp_seg_size;
-
-			if (!IsValidWalSegSize(WalSegSz))
-				fatal_error(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d byte",
-									 "WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d bytes",
-									 WalSegSz),
-							fname, WalSegSz);
-		}
-		else
-		{
-			if (errno != 0)
-				fatal_error("could not read file \"%s\": %s",
-							fname, strerror(errno));
-			else
-				fatal_error("not enough data in file \"%s\"", fname);
-		}
-		close(fd);
-		return true;
-	}
-
-	return false;
-}
-
-/*
- * Identify the target directory and set WalSegSz.
- *
- * Try to find the file in several places:
- * if directory != NULL:
- *	 directory /
- *	 directory / XLOGDIR /
- * else
- *	 .
- *	 XLOGDIR /
- *	 $PGDATA / XLOGDIR /
- *
- * Set the valid target directory in private->inpath.
- */
-static void
-identify_target_directory(XLogDumpPrivate *private, char *directory,
-						  char *fname)
-{
-	char		fpath[MAXPGPATH];
-
-	if (directory != NULL)
-	{
-		if (search_directory(directory, fname))
-		{
-			private->inpath = strdup(directory);
-			return;
-		}
-
-		/* directory / XLOGDIR */
-		snprintf(fpath, MAXPGPATH, "%s/%s", directory, XLOGDIR);
-		if (search_directory(fpath, fname))
-		{
-			private->inpath = strdup(fpath);
-			return;
-		}
-	}
-	else
+	if (directory == NULL)
 	{
 		const char *datadir;
 
-		/* current directory */
-		if (search_directory(".", fname))
-		{
-			private->inpath = strdup(".");
-			return;
-		}
-		/* XLOGDIR */
-		if (search_directory(XLOGDIR, fname))
-		{
-			private->inpath = strdup(XLOGDIR);
-			return;
-		}
+		/* fname */
+		fd = open(fname, O_RDONLY | PG_BINARY, 0);
+		if (fd < 0 && errno != ENOENT)
+			return -1;
+		else if (fd >= 0)
+			return fd;
+
+		/* XLOGDIR / fname */
+		snprintf(fpath, MAXPGPATH, "%s/%s",
+				 XLOGDIR, fname);
+		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+		if (fd < 0 && errno != ENOENT)
+			return -1;
+		else if (fd >= 0)
+			return fd;
 
 		datadir = getenv("PGDATA");
-		/* $PGDATA / XLOGDIR */
+		/* $PGDATA / XLOGDIR / fname */
 		if (datadir != NULL)
 		{
-			snprintf(fpath, MAXPGPATH, "%s/%s", datadir, XLOGDIR);
-			if (search_directory(fpath, fname))
-			{
-				private->inpath = strdup(fpath);
-				return;
-			}
+			snprintf(fpath, MAXPGPATH, "%s/%s/%s",
+					 datadir, XLOGDIR, fname);
+			fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+			if (fd < 0 && errno != ENOENT)
+				return -1;
+			else if (fd >= 0)
+				return fd;
 		}
 	}
-
-	/* could not locate WAL file */
-	if (fname)
-		fatal_error("could not locate WAL file \"%s\"", fname);
 	else
-		fatal_error("could not find any WAL file");
+	{
+		/* directory / fname */
+		snprintf(fpath, MAXPGPATH, "%s/%s",
+				 directory, fname);
+		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+		if (fd < 0 && errno != ENOENT)
+			return -1;
+		else if (fd >= 0)
+			return fd;
+
+		/* directory / XLOGDIR / fname */
+		snprintf(fpath, MAXPGPATH, "%s/%s/%s",
+				 directory, XLOGDIR, fname);
+		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+		if (fd < 0 && errno != ENOENT)
+			return -1;
+		else if (fd >= 0)
+			return fd;
+	}
+	return -1;
 }
 
 /*
@@ -286,9 +193,9 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 		int			segbytes;
 		int			readbytes;
 
-		startoff = XLogSegmentOffset(recptr, WalSegSz);
+		startoff = recptr % XLogSegSize;
 
-		if (sendFile < 0 || !XLByteInSeg(recptr, sendSegNo, WalSegSz))
+		if (sendFile < 0 || !XLByteInSeg(recptr, sendSegNo))
 		{
 			char		fname[MAXFNAMELEN];
 			int			tries;
@@ -297,9 +204,9 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 			if (sendFile >= 0)
 				close(sendFile);
 
-			XLByteToSeg(recptr, sendSegNo, WalSegSz);
+			XLByteToSeg(recptr, sendSegNo);
 
-			XLogFileName(fname, timeline_id, sendSegNo, WalSegSz);
+			XLogFileName(fname, timeline_id, sendSegNo);
 
 			/*
 			 * In follow mode there is a short period of time after the server
@@ -309,7 +216,7 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 			 */
 			for (tries = 0; tries < 10; tries++)
 			{
-				sendFile = open_file_in_directory(directory, fname);
+				sendFile = fuzzy_open_file(directory, fname);
 				if (sendFile >= 0)
 					break;
 				if (errno == ENOENT)
@@ -340,7 +247,7 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 				int			err = errno;
 				char		fname[MAXPGPATH];
 
-				XLogFileName(fname, timeline_id, sendSegNo, WalSegSz);
+				XLogFileName(fname, timeline_id, sendSegNo);
 
 				fatal_error("could not seek in log file %s to offset %u: %s",
 							fname, startoff, strerror(err));
@@ -349,8 +256,8 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 		}
 
 		/* How many bytes are within this segment? */
-		if (nbytes > (WalSegSz - startoff))
-			segbytes = WalSegSz - startoff;
+		if (nbytes > (XLogSegSize - startoff))
+			segbytes = XLogSegSize - startoff;
 		else
 			segbytes = nbytes;
 
@@ -360,7 +267,7 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 			int			err = errno;
 			char		fname[MAXPGPATH];
 
-			XLogFileName(fname, timeline_id, sendSegNo, WalSegSz);
+			XLogFileName(fname, timeline_id, sendSegNo);
 
 			fatal_error("could not read from log file %s, offset %u, length %d: %s",
 						fname, sendOff, segbytes, strerror(err));
@@ -433,7 +340,6 @@ lw_waldump(PG_FUNCTION_ARGS)
 	config.stats = false;
 	config.stats_per_record = false;
 
-	identify_target_directory(&private, private.inpath, NULL);
 	private.startptr = GetXLogReplayRecPtr(&private.timeline);
 	/* we don't know what to print */
 	if (XLogRecPtrIsInvalid(private.startptr))
@@ -446,8 +352,7 @@ lw_waldump(PG_FUNCTION_ARGS)
 	/* done with argument parsing, do the actual work */
 
 	/* we have everything we need, start reading */
-	xlogreader_state = XLogReaderAllocate(WalSegSz, XLogDumpReadPage,
-										  &private);
+	xlogreader_state = XLogReaderAllocate(XLogDumpReadPage, &private);
 	if (!xlogreader_state)
 		fatal_error("out of memory");
 
@@ -460,14 +365,13 @@ lw_waldump(PG_FUNCTION_ARGS)
 	 * to the start of a record and also wasn't a pointer to the beginning of
 	 * a segment (e.g. we were used in file mode).
 	 */
-	if (first_record != private.startptr &&
-		XLogSegmentOffset(private.startptr, WalSegSz) != 0)
-		printf(ngettext("first record is after %X/%X, at %X/%X, skipping over %u byte\n",
-						"first record is after %X/%X, at %X/%X, skipping over %u bytes\n",
-						(first_record - private.startptr)),
-			   (uint32) (private.startptr >> 32), (uint32) private.startptr,
-			   (uint32) (first_record >> 32), (uint32) first_record,
-			   (uint32) (first_record - private.startptr));
+        if (first_record != private.startptr && (private.startptr % XLogSegSize) != 0)
+                printf(ngettext("first record is after %X/%X, at %X/%X, skipping over %u byte\n",
+                                                "first record is after %X/%X, at %X/%X, skipping over %u bytes\n",
+                                                (first_record - private.startptr)),
+                           (uint32) (private.startptr >> 32), (uint32) private.startptr,
+                           (uint32) (first_record >> 32), (uint32) first_record,
+                           (uint32) (first_record - private.startptr));
 
 	for (;;)
 	{
