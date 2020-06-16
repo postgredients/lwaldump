@@ -477,6 +477,8 @@ lw_waldump(PG_FUNCTION_ARGS)
 		{
 			break;
 		}
+		/* after reading the first record, continue at next one */
+		first_record = InvalidXLogRecPtr;
 		last_lsn = xlogreader_state->EndRecPtr;
 	}
 
