@@ -29,6 +29,7 @@
 #include "access/xlog.h"
 #include "access/transam.h"
 #include "common/fe_memutils.h"
+#include "common/logging.h"
 #include "getopt_long.h"
 #include "miscadmin.h"
 
@@ -158,8 +159,10 @@ search_directory(const char *directory, const char *fname)
 	if (fd >= 0)
 	{
 		PGAlignedXLogBlock buf;
+		int			r;
 
-		if (read(fd, buf.data, XLOG_BLCKSZ) == XLOG_BLCKSZ)
+		r = read(fd, buf.data, XLOG_BLCKSZ);
+		if (r == XLOG_BLCKSZ)
 		{
 			XLogLongPageHeader longhdr = (XLogLongPageHeader) buf.data;
 
@@ -177,7 +180,8 @@ search_directory(const char *directory, const char *fname)
 				fatal_error("could not read file \"%s\": %s",
 							fname, strerror(errno));
 			else
-				fatal_error("not enough data in file \"%s\"", fname);
+				fatal_error("could not read file \"%s\": read %d of %zu",
+							fname, r, (Size) XLOG_BLCKSZ);
 		}
 		close(fd);
 		return true;
@@ -359,11 +363,17 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 		{
 			int			err = errno;
 			char		fname[MAXPGPATH];
+			int			save_errno = errno;
 
 			XLogFileName(fname, timeline_id, sendSegNo, WalSegSz);
+			errno = save_errno;
 
-			fatal_error("could not read from log file %s, offset %u, length %d: %s",
-						fname, sendOff, segbytes, strerror(err));
+			if (readbytes < 0)
+				fatal_error("could not read from log file %s, offset %u, length %d: %s",
+							fname, sendOff, segbytes, strerror(err));
+			else if (readbytes == 0)
+				fatal_error("could not read from log file %s, offset %u: read %d of %zu",
+							fname, sendOff, readbytes, (Size) segbytes);
 		}
 
 		/* Update state for read */
