@@ -1,5 +1,5 @@
-# lw_waldump extension
-comment = 'lw_waldump extenstion for PostgreSQL!'
+# lwaldump extension
+comment = 'lwaldump extenstion for PostgreSQL!'
 default_version = '1.0'
-module_pathname = '$libdir/lw_waldump'
+module_pathname = '$libdir/lwaldump'
 relocatable = true
