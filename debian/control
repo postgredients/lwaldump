@@ -1,0 +1,12 @@
+Source: lwaldump-12
+Maintainer: Georgy Rylov (Yandex.Cloud) <godjan@yandex-team.ru> 
+Section: database
+Priority: optional
+Build-Depends: debhelper (>= 9), postgresql-server-dev-all (>=195~), postgresql-server-dev-12
+Standards-Version: 4.3.0
+Homepage: https://github.yandex-team.ru/mdb/lwaldump
+
+Package: lwaldump-12
+Architecture: any
+Depends: postgresql-12, ${misc:Depends}, ${shlibs:Depends}
+Description: Finds last lsn flushed to disk.

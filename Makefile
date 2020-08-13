@@ -1,10 +1,10 @@
-MODULES = lw_waldump
+MODULES = lwaldump
 
-EXTENSION = lw_waldump
-DATA = lw_waldump--1.0.sql
-PGFILEDESC = "lw_waldump - allows get last flushed to WAL lsn even if PostgreSQL was crushed"
+EXTENSION = lwaldump
+DATA = lwaldump--1.0.sql
+PGFILEDESC = "lwaldump - allows get last flushed to WAL lsn even if PostgreSQL was crushed"
 
-REGRESS = lw_waldump
+REGRESS = lwaldump
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
