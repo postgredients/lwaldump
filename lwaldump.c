@@ -34,7 +34,7 @@
 
 PG_MODULE_MAGIC;
 
-PG_FUNCTION_INFO_V1(lw_waldump);
+PG_FUNCTION_INFO_V1(lwaldump);
 
 static const char *progname;
 
@@ -405,7 +405,7 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 }
 
 Datum
-lw_waldump(PG_FUNCTION_ARGS)
+lwaldump(PG_FUNCTION_ARGS)
 {
 	XLogRecPtr	last_lsn;
 	XLogReaderState *xlogreader_state;
