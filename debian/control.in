@@ -1,12 +1,12 @@
-Source: lwaldump-10
-Maintainer: Georgy Rylov (Yandex.Cloud) <godjan@yandex-team.ru> 
+Source: lwaldump
+Maintainer: Georgy Rylov (Yandex.Cloud) <godjan@yandex-team.ru>
 Section: database
 Priority: optional
 Build-Depends: debhelper (>= 9), postgresql-server-dev-all (>=195~), postgresql-server-dev-10 (=10.8-102-yandex.44280.4411902), libpq-dev (=10.8-102-yandex.44280.4411902)
 Standards-Version: 4.3.0
 Homepage: https://github.yandex-team.ru/mdb/lwaldump
 
-Package: lwaldump-10
+Package: lwaldump-PGVERSION
 Architecture: any
-Depends: postgresql-10, ${misc:Depends}, ${shlibs:Depends}
+Depends: postgresql-PGVERSION, ${misc:Depends}, ${shlibs:Depends}
 Description: Finds last lsn flushed to disk.
