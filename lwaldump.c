@@ -456,8 +456,12 @@ lwaldump(PG_FUNCTION_ARGS)
 	/* done with argument parsing, do the actual work */
 
 	/* we have everything we need, start reading */
-	xlogreader_state = XLogReaderAllocate(WalSegSz, XLogDumpReadPage,
-										  &private);
+	xlogreader_state =
+        XLogReaderAllocate(WalSegSz, NULL,
+                           XL_ROUTINE(.page_read = WALDumpReadPage,
+                                      .segment_open = WALDumpOpenSegment,
+                                      .segment_close = WALDumpCloseSegment),
+                           &private);
 	if (!xlogreader_state)
 		fatal_error("out of memory");
 
