@@ -432,7 +432,7 @@ lwaldump(PG_FUNCTION_ARGS)
 	for (;;)
 	{
 		/* try to read the next record */
-		record = XLogReadRecord(xlogreader_state, first_record, &errormsg);
+		record = XLogReadRecord(xlogreader_state, &errormsg);
 		if (!record)
 		{
 			break;
