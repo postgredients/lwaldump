@@ -403,7 +403,7 @@ lwaldump(PG_FUNCTION_ARGS)
 
 	/* we have everything we need, start reading */
 	xlogreader_state =
-        XLogReaderAllocate(WalSegSz, NULL,
+        XLogReaderAllocate(WalSegSz, private.inpath,
                            XL_ROUTINE(.page_read = WALDumpReadPage,
                                       .segment_open = WALDumpOpenSegment,
                                       .segment_close = WALDumpCloseSegment),
@@ -413,6 +413,7 @@ lwaldump(PG_FUNCTION_ARGS)
 
 
 	first_record = private.startptr;
+	xlogreader_state->EndRecPtr = first_record;
 
 	last_lsn = private.startptr;
 	/*
