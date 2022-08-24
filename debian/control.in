@@ -1,8 +1,8 @@
 Source: lwaldump
-Maintainer: Georgy Rylov (Yandex.Cloud) <godjan@yandex-team.ru>
+Maintainer: Yandex.Cloud <mdb@yandex-team.ru>
 Section: database
 Priority: optional
-Build-Depends: debhelper (>= 9), postgresql-server-dev-all (>=195~), postgresql-server-dev-15
+Build-Depends: debhelper (>= 9), postgresql-server-dev-all (>=195~)
 Standards-Version: 4.3.0
 Homepage: https://github.yandex-team.ru/mdb/lwaldump
 
