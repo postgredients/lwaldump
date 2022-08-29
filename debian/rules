@@ -10,7 +10,7 @@ override_dh_auto_test:
 	# nothing to do here, see debian/tests/* instead
 
 override_dh_auto_install:
-	+export PG_SUPPORTED_VERSIONS=installed && pg_buildext install build-%v postgresql-%v-lwaldump
+	+export PG_SUPPORTED_VERSIONS=installed && pg_buildext install build-%v lwaldump-%v
 
 override_dh_auto_clean:
 	+pg_buildext clean build-%v
