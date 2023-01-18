@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * hello_ext.c
+ * lwaldump.c
  *     example extenstion for PostgreSQL
  *
- * Copyright (c) 2014-2015, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2023, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		hello_ext/hello_ext.c
+ *		lwaldump.c
  *
  *-------------------------------------------------------------------------
  */
@@ -74,26 +74,6 @@ typedef struct Stats
 } Stats;
 
 #define MAX_XLINFO_TYPES 16
-static void fatal_error(const char *fmt,...) pg_attribute_printf(1, 2);
-
-/*
- * Big red button to push when things go horribly wrong.
- */
-static void
-fatal_error(const char *fmt,...)
-{
-	va_list		args;
-
-	fflush(stdout);
-
-	fprintf(stderr, _("%s: FATAL:  "), progname);
-	va_start(args, fmt);
-	vfprintf(stderr, _(fmt), args);
-	va_end(args);
-	fputc('\n', stderr);
-
-	exit(EXIT_FAILURE);
-}
 
 /*
  * Open the file in the valid target directory.
@@ -105,15 +85,18 @@ open_file_in_directory(const char *directory, const char *fname)
 {
 	int			fd = -1;
 	char		fpath[MAXPGPATH];
+	char * errormsg;
 
 	Assert(directory != NULL);
 
 	snprintf(fpath, MAXPGPATH, "%s/%s", directory, fname);
 	fd = open(fpath, O_RDONLY | PG_BINARY, 0);
 
-	if (fd < 0 && errno != ENOENT)
-		fatal_error("could not open file \"%s\": %s",
-					fname, strerror(errno));
+	if (fd < 0 && errno != ENOENT) {
+		errormsg = strerror(errno);
+		elog(ERROR, "could not open file \"%s\": %s",
+					fname, errormsg);
+	}
 	return fd;
 }
 
@@ -124,21 +107,19 @@ open_file_in_directory(const char *directory, const char *fname)
  * wal segment size.
  */
 static bool
-search_directory(const char *directory, const char *fname)
+search_directory(const char *directory)
 {
 	int			fd = -1;
 	DIR		   *xldir;
-
-	/* open file if valid filename is provided */
-	if (fname != NULL)
-		fd = open_file_in_directory(directory, fname);
+	char *errormsg;
+	char *fname;
 
 	/*
 	 * A valid file name is not passed, so search the complete directory.  If
 	 * we find any file whose name is a valid WAL file name then try to open
 	 * it.  If we cannot open it, bail out.
 	 */
-	else if ((xldir = opendir(directory)) != NULL)
+	if ((xldir = opendir(directory)) != NULL)
 	{
 		struct dirent *xlde;
 
@@ -169,18 +150,19 @@ search_directory(const char *directory, const char *fname)
 			WalSegSz = longhdr->xlp_seg_size;
 
 			if (!IsValidWalSegSize(WalSegSz))
-				fatal_error(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d byte",
+				elog(ERROR, ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d byte",
 									 "WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d bytes",
 									 WalSegSz),
 							fname, WalSegSz);
 		}
 		else
 		{
-			if (errno != 0)
-				fatal_error("could not read file \"%s\": %s",
-							fname, strerror(errno));
-			else
-				fatal_error("could not read file \"%s\": read %d of %zu",
+			if (errno != 0) {
+				errormsg = strerror(errno);
+				elog(ERROR, "could not read file \"%s\": %s",
+							fname, errormsg);
+			} else
+				elog(ERROR, "could not read file \"%s\": read %d of %zu",
 							fname, r, (Size) XLOG_BLCKSZ);
 		}
 		close(fd);
@@ -205,62 +187,38 @@ search_directory(const char *directory, const char *fname)
  * Set the valid target directory in private->inpath.
  */
 static void
-identify_target_directory(XLogDumpPrivate *private, char *directory,
-						  char *fname)
+identify_target_directory(XLogDumpPrivate *private)
 {
 	char		fpath[MAXPGPATH];
+	const char *datadir;
 
-	if (directory != NULL)
+	/* current directory */
+	if (search_directory("."))
 	{
-		if (search_directory(directory, fname))
-		{
-			private->inpath = strdup(directory);
-			return;
-		}
+		private->inpath = strdup(".");
+		return;
+	}
+	/* XLOGDIR */
+	if (search_directory(XLOGDIR))
+	{
+		private->inpath = strdup(XLOGDIR);
+		return;
+	}
 
-		/* directory / XLOGDIR */
-		snprintf(fpath, MAXPGPATH, "%s/%s", directory, XLOGDIR);
-		if (search_directory(fpath, fname))
+	datadir = getenv("PGDATA");
+	/* $PGDATA / XLOGDIR */
+	if (datadir != NULL)
+	{
+		snprintf(fpath, MAXPGPATH, "%s/%s", datadir, XLOGDIR);
+		if (search_directory(fpath))
 		{
 			private->inpath = strdup(fpath);
 			return;
 		}
 	}
-	else
-	{
-		const char *datadir;
-
-		/* current directory */
-		if (search_directory(".", fname))
-		{
-			private->inpath = strdup(".");
-			return;
-		}
-		/* XLOGDIR */
-		if (search_directory(XLOGDIR, fname))
-		{
-			private->inpath = strdup(XLOGDIR);
-			return;
-		}
-
-		datadir = getenv("PGDATA");
-		/* $PGDATA / XLOGDIR */
-		if (datadir != NULL)
-		{
-			snprintf(fpath, MAXPGPATH, "%s/%s", datadir, XLOGDIR);
-			if (search_directory(fpath, fname))
-			{
-				private->inpath = strdup(fpath);
-				return;
-			}
-		}
-	}
 
 	/* could not locate WAL file */
-	if (fname)
-		fatal_error("could not locate WAL file \"%s\"", fname);
-	else
-		fatal_error("could not find any WAL file");
+	elog(ERROR, "could not find any WAL file");
 }
 
 /* pg_waldump's XLogReaderRoutine->segment_open callback */
@@ -299,7 +257,7 @@ WALDumpOpenSegment(XLogReaderState *state, XLogSegNo nextSegNo,
 		break;
 	}
 
-	fatal_error("could not find file \"%s\": %m", fname);
+	elog(ERROR, "could not find file \"%s\": %m", fname);
 }
 
 /*
@@ -314,7 +272,7 @@ WALDumpCloseSegment(XLogReaderState *state)
 	state->seg.ws_file = -1;
 }
 
-/* pg_waldump's XLogReaderRoutine->page_read callback */
+/* lwaldump's XLogReaderRoutine->page_read callback */
 static int
 WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 				XLogRecPtr targetPtr, char *readBuff)
@@ -348,11 +306,11 @@ WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 		if (errinfo.wre_errno != 0)
 		{
 			errno = errinfo.wre_errno;
-			fatal_error("could not read from file %s, offset %u: %m",
+			elog(ERROR, "could not read from file %s, offset %u: %m",
 						fname, errinfo.wre_off);
 		}
 		else
-			fatal_error("could not read from file %s, offset %u: read %d of %zu",
+			elog(ERROR, "could not read from file %s, offset %u: read %d of %zu",
 						fname, errinfo.wre_off, errinfo.wre_read,
 						(Size) errinfo.wre_req);
 	}
@@ -370,6 +328,10 @@ lwaldump(PG_FUNCTION_ARGS)
 	XLogRecord *record;
 	XLogRecPtr	first_record;
 	char	   *errormsg;
+
+	if (!RecoveryInProgress()) {
+		elog(ERROR, "do not run lwaldump on primary");
+	}
 
 	memset(&private, 0, sizeof(XLogDumpPrivate));
 	memset(&config, 0, sizeof(XLogDumpConfig));
@@ -389,14 +351,13 @@ lwaldump(PG_FUNCTION_ARGS)
 	config.stats = false;
 	config.stats_per_record = false;
 
-	identify_target_directory(&private, private.inpath, NULL);
+	identify_target_directory(&private);
 	private.startptr = GetXLogReplayRecPtr(&private.timeline);
 	/* we don't know what to print */
 	if (XLogRecPtrIsInvalid(private.startptr))
 	{
-		fprintf(stderr, _("replayptr: %lu, timeline: %u\n"), private.startptr, private.timeline);
-		fprintf(stderr, _("%s: no start WAL location given\n"), progname);
-		goto bad_argument;
+		elog(LOG, "replayptr: %lu, timeline: %u", private.startptr, private.timeline);
+		elog(ERROR, "%s: no start WAL location given", progname);
 	}
 
 	/* done with argument parsing, do the actual work */
@@ -409,7 +370,7 @@ lwaldump(PG_FUNCTION_ARGS)
                                       .segment_close = WALDumpCloseSegment),
                            &private);
 	if (!xlogreader_state)
-		fatal_error("out of memory");
+		elog(ERROR, "out of memory");
 
 
 	first_record = private.startptr;
@@ -446,9 +407,5 @@ lwaldump(PG_FUNCTION_ARGS)
 
 	XLogReaderFree(xlogreader_state);
 
-	PG_RETURN_LSN(last_lsn);
-bad_argument:
-	fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-	fatal_error("bad argument");
 	PG_RETURN_LSN(last_lsn);
 }
