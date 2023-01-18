@@ -50,30 +50,9 @@ typedef struct XLogDumpPrivate
 	bool		endptr_reached;
 } XLogDumpPrivate;
 
-typedef struct XLogDumpConfig
-{
-	/* display options */
-	bool		bkp_details;
-	int			stop_after_records;
-	int			already_displayed_records;
-	bool		follow;
-	bool		stats;
-	bool		stats_per_record;
 
-	/* filter options */
-	int			filter_by_rmgr;
-	TransactionId filter_by_xid;
-	bool		filter_by_xid_enabled;
-} XLogDumpConfig;
-
-typedef struct Stats
-{
-	uint64		count;
-	uint64		rec_len;
-	uint64		fpi_len;
-} Stats;
-
-#define MAX_XLINFO_TYPES 16
+XLogRecord *
+lwXLogReadRecord(XLogReaderState *state, char **errormsg);
 
 /*
  * Open the file in the valid target directory.
@@ -221,7 +200,7 @@ identify_target_directory(XLogDumpPrivate *private)
 	elog(ERROR, "could not find any WAL file");
 }
 
-/* pg_waldump's XLogReaderRoutine->segment_open callback */
+/* lwaldump's XLogReaderRoutine->segment_open callback */
 static void
 WALDumpOpenSegment(XLogReaderState *state, XLogSegNo nextSegNo,
 				   TimeLineID *tli_p)
@@ -261,7 +240,7 @@ WALDumpOpenSegment(XLogReaderState *state, XLogSegNo nextSegNo,
 }
 
 /*
- * pg_waldump's XLogReaderRoutine->segment_close callback.  Same as
+ * lwaldump's XLogReaderRoutine->segment_close callback.  Same as
  * wal_segment_close
  */
 static void
@@ -318,13 +297,65 @@ WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 	return count;
 }
 
+
+/*
+ * Attempt to read an XLOG record.
+ *
+ * XLogBeginRead() or XLogFindNextRecord() must be called before the first call
+ * to XLogReadRecord().
+ *
+ * If the page_read callback fails to read the requested data, NULL is
+ * returned.  The callback is expected to have reported the error; errormsg
+ * is set to NULL.
+ *
+ * If the reading fails for some other reason, NULL is also returned, and
+ * *errormsg is set to a string with details of the failure.
+ *
+ * The returned pointer (or *errormsg) points to an internal buffer that's
+ * valid until the next call to XLogReadRecord.
+ */
+XLogRecord *
+lwXLogReadRecord(XLogReaderState *state, char **errormsg)
+{
+	DecodedXLogRecord *decoded;
+
+	/*
+	 * Release last returned record, if there is one.  We need to do this so
+	 * that we can check for empty decode queue accurately.
+	 */
+	XLogReleasePreviousRecord(state);
+
+	/*
+	 * Call XLogReadAhead() in blocking mode to make sure there is something
+	 * in the queue, though we don't use the result.
+	 */
+	// if (!XLogReaderHasQueuedRecordOrError(state))
+	// 	XLogReadAhead(state, false /* nonblocking */ );
+
+	/* Consume the head record or error. */
+	decoded = XLogNextRecord(state, errormsg);
+	if (decoded)
+	{
+		/*
+		 * This function returns a pointer to the record's header, not the
+		 * actual decoded record.  The caller will access the decoded record
+		 * through the XLogRecGetXXX() macros, which reach the decoded
+		 * recorded as xlogreader->record.
+		 */
+		Assert(state->record == decoded);
+		return &decoded->header;
+	}
+
+	return NULL;
+}
+
+
 Datum
 lwaldump(PG_FUNCTION_ARGS)
 {
 	XLogRecPtr	last_lsn;
 	XLogReaderState *xlogreader_state;
 	XLogDumpPrivate private;
-	XLogDumpConfig config;
 	XLogRecord *record;
 	XLogRecPtr	first_record;
 	char	   *errormsg;
@@ -334,22 +365,11 @@ lwaldump(PG_FUNCTION_ARGS)
 	}
 
 	memset(&private, 0, sizeof(XLogDumpPrivate));
-	memset(&config, 0, sizeof(XLogDumpConfig));
 
 	private.timeline = 1;
 	private.startptr = InvalidXLogRecPtr;
 	private.endptr = InvalidXLogRecPtr;
 	private.endptr_reached = false;
-
-	config.bkp_details = false;
-	config.stop_after_records = -1;
-	config.already_displayed_records = 0;
-	config.follow = false;
-	config.filter_by_rmgr = -1;
-	config.filter_by_xid = InvalidTransactionId;
-	config.filter_by_xid_enabled = false;
-	config.stats = false;
-	config.stats_per_record = false;
 
 	identify_target_directory(&private);
 	private.startptr = GetXLogReplayRecPtr(&private.timeline);
@@ -383,18 +403,23 @@ lwaldump(PG_FUNCTION_ARGS)
 	 * a segment (e.g. we were used in file mode).
 	 */
 	if (first_record != private.startptr &&
-		XLogSegmentOffset(private.startptr, WalSegSz) != 0)
-		printf(ngettext("first record is after %X/%X, at %X/%X, skipping over %u byte\n",
+		XLogSegmentOffset(private.startptr, WalSegSz) != 0) {
+		elog(LOG, ngettext("first record is after %X/%X, at %X/%X, skipping over %u byte\n",
 						"first record is after %X/%X, at %X/%X, skipping over %u bytes\n",
 						(first_record - private.startptr)),
 			   (uint32) (private.startptr >> 32), (uint32) private.startptr,
 			   (uint32) (first_record >> 32), (uint32) first_record,
 			   (uint32) (first_record - private.startptr));
+	} else {
+		elog(LOG, "first record is after %X/%X, at %X/%X",
+		(uint32) (private.startptr >> 32), (uint32) private.startptr,
+		(uint32) (first_record >> 32), (uint32) first_record);
+	}
 
 	for (;;)
 	{
 		/* try to read the next record */
-		record = XLogReadRecord(xlogreader_state, &errormsg);
+		record = lwXLogReadRecord(xlogreader_state, &errormsg);
 		if (!record)
 		{
 			break;
