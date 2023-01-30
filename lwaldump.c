@@ -32,6 +32,7 @@
 #include "common/logging.h"
 #include "getopt_long.h"
 #include "miscadmin.h"
+#include "access/xlogrecovery.h"
 
 PG_MODULE_MAGIC;
 
@@ -427,6 +428,8 @@ lwaldump(PG_FUNCTION_ARGS)
 		/* after reading the first record, continue at next one */
 		first_record = InvalidXLogRecPtr;
 		last_lsn = xlogreader_state->EndRecPtr;
+
+		elog(LOG, "next record is at %X/%X\n", (uint32) (last_lsn >> 32), (uint32) last_lsn);
 	}
 
 
