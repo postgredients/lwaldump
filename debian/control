@@ -5,11 +5,11 @@ Priority: optional
 Build-Depends:
  debhelper (>= 9),
  postgresql-server-dev-all (>= 195~),
- postgresql-server-dev-15
+ postgresql-server-dev-16
 Standards-Version: 4.3.0
 Homepage: https://github.yandex-team.ru/mdb/lwaldump
 
-Package: lwaldump-15
+Package: lwaldump-16
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, postgresql-15
+Depends: ${shlibs:Depends}, ${misc:Depends}, postgresql-16
 Description: Extension to create a logical replication slot in the past.
