@@ -15,7 +15,6 @@
 #include "fmgr.h"
 #include "utils/builtins.h"
 #include "utils/pg_lsn.h"
-#include "postgres.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -25,18 +24,15 @@
 #include "access/xlogrecord.h"
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
-#include "access/transam.h"
-#include "common/fe_memutils.h"
-#include "common/logging.h"
-#include "getopt_long.h"
-#include "miscadmin.h"
+#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
+#endif
+#include "access/transam.h"
+#include "miscadmin.h"
 
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(lwaldump);
-
-static const char *progname;
 
 static int	WalSegSz;
 
@@ -49,9 +45,6 @@ typedef struct XLogDumpPrivate
 	bool		endptr_reached;
 } XLogDumpPrivate;
 
-
-XLogRecord *
-lwXLogReadRecord(XLogReaderState *state, char **errormsg);
 
 /*
  * Open the file in the valid target directory.
@@ -199,6 +192,46 @@ identify_target_directory(XLogDumpPrivate *private)
 	elog(ERROR, "could not find any WAL file");
 }
 
+/*
+ * Freeze the scan at the end of the newest local segment on this timeline.
+ * Without an upper bound XLogReader tries to open the next, absent segment
+ * after consuming a segment exactly to its end.
+ */
+static XLogRecPtr
+find_local_wal_end(const char *directory, TimeLineID timeline)
+{
+	DIR		   *xldir;
+	struct dirent *xlde;
+	XLogSegNo	max_segno = 0;
+	bool		found = false;
+
+	xldir = opendir(directory);
+	if (xldir == NULL)
+		elog(ERROR, "could not open directory \"%s\": %m", directory);
+
+	while ((xlde = readdir(xldir)) != NULL)
+	{
+		TimeLineID	file_timeline;
+		XLogSegNo	segno;
+
+		if (!IsXLogFileName(xlde->d_name))
+			continue;
+
+		XLogFromFileName(xlde->d_name, &file_timeline, &segno, WalSegSz);
+		if (file_timeline == timeline && (!found || segno > max_segno))
+		{
+			max_segno = segno;
+			found = true;
+		}
+	}
+
+	closedir(xldir);
+	if (!found)
+		elog(ERROR, "could not find a WAL file for timeline %u", timeline);
+
+	return (max_segno + 1) * WalSegSz;
+}
+
 /* lwaldump's XLogReaderRoutine->segment_open callback */
 static void
 WALDumpOpenSegment(XLogReaderState *state, XLogSegNo nextSegNo,
@@ -297,58 +330,6 @@ WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 }
 
 
-/*
- * Attempt to read an XLOG record.
- *
- * XLogBeginRead() or XLogFindNextRecord() must be called before the first call
- * to XLogReadRecord().
- *
- * If the page_read callback fails to read the requested data, NULL is
- * returned.  The callback is expected to have reported the error; errormsg
- * is set to NULL.
- *
- * If the reading fails for some other reason, NULL is also returned, and
- * *errormsg is set to a string with details of the failure.
- *
- * The returned pointer (or *errormsg) points to an internal buffer that's
- * valid until the next call to XLogReadRecord.
- */
-XLogRecord *
-lwXLogReadRecord(XLogReaderState *state, char **errormsg)
-{
-	DecodedXLogRecord *decoded;
-
-	/*
-	 * Release last returned record, if there is one.  We need to do this so
-	 * that we can check for empty decode queue accurately.
-	 */
-	XLogReleasePreviousRecord(state);
-
-	/*
-	 * Call XLogReadAhead() in blocking mode to make sure there is something
-	 * in the queue, though we don't use the result.
-	 */
-	// if (!XLogReaderHasQueuedRecordOrError(state))
-	// 	XLogReadAhead(state, false /* nonblocking */ );
-
-	/* Consume the head record or error. */
-	decoded = XLogNextRecord(state, errormsg);
-	if (decoded)
-	{
-		/*
-		 * This function returns a pointer to the record's header, not the
-		 * actual decoded record.  The caller will access the decoded record
-		 * through the XLogRecGetXXX() macros, which reach the decoded
-		 * recorded as xlogreader->record.
-		 */
-		Assert(state->record == decoded);
-		return &decoded->header;
-	}
-
-	return NULL;
-}
-
-
 Datum
 lwaldump(PG_FUNCTION_ARGS)
 {
@@ -372,12 +353,9 @@ lwaldump(PG_FUNCTION_ARGS)
 
 	identify_target_directory(&private);
 	private.startptr = GetXLogReplayRecPtr(&private.timeline);
-	/* we don't know what to print */
 	if (XLogRecPtrIsInvalid(private.startptr))
-	{
-		elog(LOG, "replayptr: %lu, timeline: %u", private.startptr, private.timeline);
-		elog(ERROR, "%s: no start WAL location given", progname);
-	}
+		elog(ERROR, "no replay WAL location available");
+	private.endptr = find_local_wal_end(private.inpath, private.timeline);
 
 	/* done with argument parsing, do the actual work */
 
@@ -393,7 +371,7 @@ lwaldump(PG_FUNCTION_ARGS)
 
 
 	first_record = private.startptr;
-	xlogreader_state->EndRecPtr = first_record;
+	XLogBeginRead(xlogreader_state, first_record);
 
 	last_lsn = private.startptr;
 	/*
@@ -418,7 +396,7 @@ lwaldump(PG_FUNCTION_ARGS)
 	for (;;)
 	{
 		/* try to read the next record */
-		record = lwXLogReadRecord(xlogreader_state, &errormsg);
+		record = XLogReadRecord(xlogreader_state, &errormsg);
 		if (!record)
 		{
 			break;
