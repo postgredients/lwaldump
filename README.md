@@ -16,6 +16,10 @@ disk.
 records. A scan failure is an error; callers must not fall back to SQL receive
 or replay positions.
 
+`lwaldump_with_timeline()` returns the replay timeline together with the
+durable endpoint scanned by the extension. This binds a failover vote's
+timeline to its exact local WAL position.
+
 ## PostgreSQL 14-19 compatibility
 
 The extension is backend code and does not use `FRONTEND` headers. PostgreSQL
@@ -38,6 +42,7 @@ make PG_CONFIG=/path/to/pg_config install
 ```sql
 CREATE EXTENSION lwaldump;
 SELECT lwaldump();
+SELECT * FROM lwaldump_with_timeline();
 ```
 
 The function is valid only on a server in recovery with a replay position and

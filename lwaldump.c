@@ -13,6 +13,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "funcapi.h"
 #include "utils/builtins.h"
 #include "utils/pg_lsn.h"
 
@@ -33,6 +34,7 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(lwaldump);
+PG_FUNCTION_INFO_V1(lwaldump_with_timeline);
 
 static int	WalSegSz;
 
@@ -330,8 +332,8 @@ WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 }
 
 
-Datum
-lwaldump(PG_FUNCTION_ARGS)
+static XLogRecPtr
+lwaldump_scan(TimeLineID *timeline)
 {
 	XLogRecPtr	last_lsn;
 	XLogReaderState *xlogreader_state;
@@ -339,10 +341,6 @@ lwaldump(PG_FUNCTION_ARGS)
 	XLogRecord *record;
 	XLogRecPtr	first_record;
 	char	   *errormsg;
-
-	if (!RecoveryInProgress()) {
-		elog(ERROR, "do not run lwaldump on primary");
-	}
 
 	memset(&private, 0, sizeof(XLogDumpPrivate));
 
@@ -411,5 +409,42 @@ lwaldump(PG_FUNCTION_ARGS)
 
 	XLogReaderFree(xlogreader_state);
 
-	PG_RETURN_LSN(last_lsn);
+	*timeline = private.timeline;
+	return last_lsn;
+}
+
+Datum
+lwaldump(PG_FUNCTION_ARGS)
+{
+	TimeLineID	timeline;
+
+	if (!RecoveryInProgress())
+		elog(ERROR, "do not run lwaldump on primary");
+
+	PG_RETURN_LSN(lwaldump_scan(&timeline));
+}
+
+Datum
+lwaldump_with_timeline(PG_FUNCTION_ARGS)
+{
+	TimeLineID	timeline;
+	XLogRecPtr	last_lsn;
+	TupleDesc	tupdesc;
+	HeapTuple	tuple;
+	Datum		values[2];
+	bool		nulls[2] = {false, false};
+
+	if (!RecoveryInProgress())
+		elog(ERROR, "do not run lwaldump on primary");
+
+	last_lsn = lwaldump_scan(&timeline);
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("lwaldump_with_timeline must be called in a record context")));
+
+	values[0] = Int32GetDatum(timeline);
+	values[1] = LSNGetDatum(last_lsn);
+	tuple = heap_form_tuple(BlessTupleDesc(tupdesc), values, nulls);
+	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
