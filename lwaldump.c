@@ -23,6 +23,7 @@
 
 #include "access/xlogreader.h"
 #include "access/xlogrecord.h"
+#include "access/htup_details.h"
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
 #if PG_VERSION_NUM >= 150000
