@@ -60,7 +60,9 @@ while :; do
     caught_up="$(run_as_postgres "$BIN/psql -h '$STANDBY_SOCKET' -p 55433 -d postgres -Atc \"SELECT COALESCE(pg_last_wal_receive_lsn() >= '$target'::pg_lsn, false)\"")"
     [ "$caught_up" = "t" ] && break
     i=$((i + 1))
-    [ "$i" -lt 120 ] || { echo "receiver did not reach $target (at $received)"; exit 10; }
+    # The matrix runs all PostgreSQL versions in parallel on a shared runner.
+    # Let a busy WAL receiver catch up instead of failing a healthy standby.
+    [ "$i" -lt 480 ] || { echo "receiver did not reach $target (at $received)"; exit 10; }
     sleep 0.25
 done
 
