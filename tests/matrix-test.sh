@@ -66,6 +66,8 @@ replay_before="$(run_as_postgres "$BIN/psql -h '$STANDBY_SOCKET' -p 55433 -d pos
 
 run_as_postgres "$BIN/psql -h '$PRIMARY_SOCKET' -p 55432 -d postgres -v ON_ERROR_STOP=1 -c \"INSERT INTO wal_payload SELECT g, repeat(md5(g::text), 12) FROM generate_series(1, 180000) AS g\"" >/dev/null
 run_as_postgres "$BIN/psql -h '$PRIMARY_SOCKET' -p 55432 -d postgres -v ON_ERROR_STOP=1 -c 'CHECKPOINT; SELECT pg_switch_wal(); SELECT pg_switch_wal();'" >/dev/null
+# A real record after the switches makes the target streamable on every PG version.
+run_as_postgres "$BIN/psql -h '$PRIMARY_SOCKET' -p 55432 -d postgres -v ON_ERROR_STOP=1 -c \"INSERT INTO wal_payload VALUES (180001, 'after switches')\"" >/dev/null
 target="$(run_as_postgres "$BIN/psql -h '$PRIMARY_SOCKET' -p 55432 -d postgres -Atc 'SELECT pg_current_wal_flush_lsn()'")"
 
 i=0
@@ -113,7 +115,7 @@ echo "COVERS_RECEIVED=$safe"
 # Replay is still on timeline 1. Install the already received local WAL and
 # history of the promoted node without allowing replay or external recovery.
 run_as_postgres "$BIN/pg_ctl -D '$PROMOTABLE' -w promote" >/dev/null
-run_as_postgres "$BIN/psql -h '$PROMOTABLE_SOCKET' -p 55434 -d postgres -v ON_ERROR_STOP=1 -c \"INSERT INTO wal_payload VALUES (180001, 'new timeline')\"" >/dev/null
+run_as_postgres "$BIN/psql -h '$PROMOTABLE_SOCKET' -p 55434 -d postgres -v ON_ERROR_STOP=1 -c \"INSERT INTO wal_payload VALUES (180002, 'new timeline')\"" >/dev/null
 new_target="$(run_as_postgres "$BIN/psql -h '$PROMOTABLE_SOCKET' -p 55434 -d postgres -Atc 'SELECT pg_current_wal_flush_lsn()'")"
 run_as_postgres "$BIN/pg_ctl -D '$PROMOTABLE' -m fast -w stop" >/dev/null
 run_as_postgres "cp '$PROMOTABLE/pg_wal/00000002.history' '$STANDBY/pg_wal/'"
