@@ -16,9 +16,18 @@ disk.
 records. A scan failure is an error; callers must not fall back to SQL receive
 or replay positions.
 
-`lwaldump_with_timeline()` returns the replay timeline together with the
-durable endpoint scanned by the extension. This binds a failover vote's
-timeline to its exact local WAL position.
+`lwaldump_with_timeline()` returns the timeline and endpoint of the last valid
+local WAL record, not necessarily the timeline currently being replayed. The
+scan follows locally present `.history` files and switches segments at timeline
+forks. It does not fetch WAL or history from an archive or a primary. Thus the
+result describes the position reachable by replay from the files already in
+`pg_wal`, after external WAL sources have been fenced.
+
+`recovery_target_timeline = latest` follows the newest local descendant of the
+replay timeline. `current` stays on the replay timeline; a numeric target only
+follows that timeline when its local history and WAL are present. A history
+file alone does not advance the returned timeline: at least one valid record
+on the new timeline must be scanned.
 
 ## PostgreSQL 14-19 compatibility
 
