@@ -28,6 +28,7 @@ listen_addresses = ''
 unix_socket_directories = '$PRIMARY_SOCKET'
 wal_level = replica
 max_wal_senders = 5
+wal_keep_size = '1GB'
 EOF
 chown postgres:postgres "$PRIMARY/postgresql.conf"
 
