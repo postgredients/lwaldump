@@ -86,3 +86,7 @@ echo "RECEIVE_FENCED=$receive_fenced"
 echo "LWALDUMP_OUTPUT=$got"
 echo "COVERS_RECEIVED=$safe"
 [ "$safe" = "t" ] || exit 12
+
+stop_clusters
+trap - EXIT
+exec /usr/local/bin/timeline-test.sh
