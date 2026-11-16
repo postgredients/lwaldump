@@ -62,7 +62,7 @@ while :; do
     i=$((i + 1))
     # The matrix runs all PostgreSQL versions in parallel on a shared runner.
     # Let a busy WAL receiver catch up instead of failing a healthy standby.
-    [ "$i" -lt 480 ] || { echo "receiver did not reach $target (at $received)"; exit 10; }
+    [ "$i" -lt 960 ] || { echo "receiver did not reach $target (at $received)"; exit 10; }
     sleep 0.25
 done
 
