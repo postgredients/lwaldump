@@ -28,6 +28,9 @@
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
 #include "access/timeline.h"
+#if PG_VERSION_NUM >= 150000
+#include "access/xlogrecovery.h"
+#endif
 #include "access/transam.h"
 #include "miscadmin.h"
 
