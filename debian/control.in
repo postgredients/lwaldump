@@ -11,4 +11,4 @@ Homepage: https://github.yandex-team.ru/mdb/lwaldump
 Package: lwaldump-PGVERSION
 Architecture: any
 Depends: postgresql-PGVERSION, ${misc:Depends}, ${shlibs:Depends}
-Description: Finds last lsn flushed to disk.
+Description: Find the endpoint of locally stored standby WAL.

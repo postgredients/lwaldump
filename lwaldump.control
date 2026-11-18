@@ -1,5 +1,5 @@
 # lwaldump extension
-comment = 'lwaldump extenstion for PostgreSQL!'
-default_version = '1.0'
+comment = 'Find the endpoint of locally stored standby WAL'
+default_version = '1.1'
 module_pathname = '$libdir/lwaldump'
 relocatable = true

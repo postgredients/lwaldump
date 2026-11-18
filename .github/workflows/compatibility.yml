@@ -22,7 +22,7 @@ jobs:
           - pg_major: 18
             pg_tag: 18-bookworm
           - pg_major: 19
-            pg_tag: 19beta3-bookworm
+            pg_tag: 19rc2-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Build extension
@@ -33,5 +33,5 @@ jobs:
           -f tests/Dockerfile
           -t lwaldump-test:${{ matrix.pg_major }}
           .
-      - name: Test fenced standby WAL endpoint
-        run: docker run --rm -e PG_MAJOR=${{ matrix.pg_major }} lwaldump-test:${{ matrix.pg_major }}
+      - name: Run TAP tests
+        run: docker run --rm lwaldump-test:${{ matrix.pg_major }}
